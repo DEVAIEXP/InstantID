@@ -19,17 +19,17 @@ from PIL import Image
 import diffusers
 from diffusers.utils import load_image
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, StableDiffusionControlNetPipeline
 from huggingface_hub import hf_hub_download
 
 from insightface.app import FaceAnalysis
 
 from style_template import styles
-from pipelines.pipeline_stable_diffusion_xl_instantid_full import StableDiffusionXLInstantIDPipeline
+#from pipelines.pipeline_stable_diffusion_xl_instantid_full import StableDiffusionXLInstantIDPipeline
 from model_util import load_models_xl, get_torch_device
 from controlnet_util import load_controlnet, load_depth_estimator as load_depth, get_depth_map, get_depth_anything_map, get_canny_image
 from common.util import clean_memory
-
+from ip_adapter import IPAdapterPlusXL
 import gradio as gr
 
 parser = argparse.ArgumentParser()
@@ -83,7 +83,7 @@ app = FaceAnalysis(
 app.prepare(ctx_id=0, det_size=(640, 640))
 
 # Path to InstantID models
-face_adapter = f"checkpoints/ip-adapter.bin"
+face_adapter = f"./checkpoints/ip-adapter-plus-face_sdxl_vit-h.bin"
 controlnet = None
 controlnet_map = {}
 
@@ -151,7 +151,7 @@ def load_model(pretrained_model_folder, model_name):
         weight_dtype=dtype,
         )
         scheduler = diffusers.EulerDiscreteScheduler.from_config(scheduler_kwargs)
-        pipe = StableDiffusionXLInstantIDPipeline(            
+        pipe = StableDiffusionControlNetPipeline(            
             vae=vae,
             text_encoder=text_encoders[0],
             text_encoder_2=text_encoders[1],
@@ -170,7 +170,7 @@ def load_model(pretrained_model_folder, model_name):
         vae = AutoencoderKL.from_pretrained(
                 "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
         )
-        pipe = StableDiffusionXLInstantIDPipeline.from_pretrained(            
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(            
             model_path,
             vae = vae,
             controlnet=[controlnet],
@@ -189,18 +189,23 @@ def assign_last_params(adapter_strength_ratio, with_cpu_offload):
     
     set_ip_adapter(adapter_strength_ratio)
     
+    pipe.enable_xformers_memory_efficient_attention()    
+    pipe.unet.to(memory_format=torch.channels_last)
+
     # apply improvements    
     if with_cpu_offload:                 
         pipe.enable_model_cpu_offload()        
     else:
         pipe.to(device)
     clean_memory()  
-    pipe.enable_xformers_memory_efficient_attention()
-    pipe.enable_vae_slicing()
+    #pipe.enable_vae_slicing()
     pipe.enable_vae_tiling() 
 
 def set_ip_adapter(adapter_strength_ratio):    
-    pipe.load_ip_adapter_instantid(face_adapter)    
+    # load ip-adapter
+    image_encoder_path = ""
+    #ip_model = IPAdapterPlusXL(pipe, image_encoder_path, face_adapter, device)
+    pipe.load_ip_adapter("./checkpoints",image_encoder_path,"ip-adapter-plus-face_sdxl_vit-h.safetensors")    
     pipe.set_ip_adapter_scale(adapter_strength_ratio)
     
 
